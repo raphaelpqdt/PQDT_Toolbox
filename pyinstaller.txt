@@ -1,0 +1,1 @@
+python -m PyInstaller --onefile --noconsole --icon="pred.ico" PQDT_Toolbox.py
