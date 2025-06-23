@@ -2,6 +2,7 @@
 # Predadores Multi-Tool - Versão Unificada
 # Combina o Auto-Restarter e o Votemap Bypass em uma única aplicação com abas.
 # ADIÇÃO: Sistema de tradução (PT-BR / EN-US) e menu para seleção de idioma.
+# ADIÇÃO: Central de Notificações com Toasts customizados.
 # ==============================================================================
 
 import os
@@ -19,6 +20,7 @@ import sys
 import webbrowser
 from datetime import datetime
 import shutil
+from collections import deque
 
 # --- Tratamento de Dependências Opcionais ---
 try:
@@ -85,10 +87,8 @@ app_logger.addHandler(app_handler)
 def resource_path(relative_path):
     """ Retorna o caminho absoluto para o recurso, funciona para dev e para PyInstaller """
     try:
-        # PyInstaller cria uma pasta temp e armazena o caminho em _MEIPASS
         base_path = sys._MEIPASS
     except AttributeError:
-        # Se não estiver rodando como bundle, o caminho é relativo ao script
         base_path = os.path.abspath(os.path.dirname(__file__))
     return os.path.join(base_path, relative_path)
 
@@ -105,47 +105,55 @@ BACKGROUND_IMAGE_PATH = resource_path(BACKGROUND_IMAGE_FILENAME)
 # SISTEMA DE TRADUÇÃO (I18N)
 # ==============================================================================
 class I18N:
-    """
-    Gerencia as traduções da aplicação.
-    """
+    """ Gerencia as traduções da aplicação. """
 
     def __init__(self, language='pt-br'):
         self.language = language
-        self.translations = {
+        self.translations = self.get_full_translation_dict()
+
+    def set_language(self, language):
+        if language in self.translations:
+            self.language = language
+            app_logger.info(f"Idioma alterado para: {language}")
+        else:
+            app_logger.warning(f"Idioma '{language}' não encontrado. Mantendo '{self.language}'.")
+
+    def get(self, key, **kwargs):
+        try:
+            val = self.translations[self.language].get(key, key)
+            if kwargs:
+                return val.format(**kwargs)
+            return val
+        except KeyError:
+            val = self.translations['en-us'].get(key, key)
+            if kwargs:
+                return val.format(**kwargs)
+            return val
+        except Exception:
+            return key
+
+    def get_full_translation_dict(self):
+        return {
             'pt-br': {
                 # Main App & Menus
-                "app_title": "PQDT_Raphael - ArmaServerToolbox",
-                "menu_language": "Idioma",
-                "menu_file": "Arquivo",
-                "menu_save_config": "Salvar Configuração",
-                "menu_exit": "Sair",
-                "menu_restarter": "Auto-Restarter",
-                "menu_add_server": "Adicionar Servidor",
-                "menu_rename_server": "Renomear Servidor",
-                "menu_remove_current_server": "Remover Servidor Atual",
-                "menu_votemap": "Votemap Bypass",
-                "menu_tools": "Ferramentas",
-                "menu_change_theme": "Mudar Tema",
-                "menu_help": "Ajuda",
+                "app_title": "PQDT_Raphael - ArmaServerToolbox", "menu_language": "Idioma", "menu_file": "Arquivo",
+                "menu_save_config": "Salvar Configuração", "menu_exit": "Sair", "menu_restarter": "Auto-Restarter",
+                "menu_add_server": "Adicionar Servidor", "menu_rename_server": "Renomear Servidor",
+                "menu_remove_current_server": "Remover Servidor Atual", "menu_votemap": "Votemap Bypass",
+                "menu_tools": "Ferramentas", "menu_change_theme": "Mudar Tema", "menu_help": "Ajuda",
                 "menu_about": "Sobre",
-                # Tabs
-                "tab_top_restarter": "Auto-Restarter",
-                "tab_top_votemap": "Votemap Bypass",
+                "tab_top_restarter": "Auto-Restarter", "tab_top_votemap": "Votemap Bypass",
                 "tab_system_log": "Log do Sistema",
-                # Status Bar
-                "status_ready": "Pronto.",
-                "status_config_saved": "Configuração salva!",
+                "status_ready": "Pronto.", "status_config_saved": "Configuração salva!",
                 "status_service_selected": "Serviço '{service}' selecionado para '{server}'.",
                 "status_server_removed": "Servidor '{server}' ({tool}) removido.",
                 "status_server_renamed": "Servidor renomeado para '{name}'.",
-                # Dialogs
                 "dialog_rename_server_title": "Renomear '{server}'",
                 "dialog_rename_server_prompt": "Digite o novo nome para o servidor:",
                 "dialog_rename_error_empty_title": "Nome Inválido",
                 "dialog_rename_error_empty_msg": "O nome do servidor não pode ser vazio.",
                 "dialog_rename_error_duplicate_title": "Nome Duplicado",
                 "dialog_rename_error_duplicate_msg": "O nome '{name}' já está em uso nesta ferramenta.",
-                # About Dialog
                 "about_title": "Sobre / About",
                 "about_message": (
                     "Esta é uma aplicação unificada que combina as funcionalidades do Auto-Restarter e do Votemap Bypass.\n\n"
@@ -158,58 +166,38 @@ class I18N:
                     "Each tool can manage multiple servers in its own internal tabs.\n\n"
                     "Developed by PQDT_Raphael for Predadores Brasil and KOTH Reforged community."
                 ),
-                # Generic & Shared
-                "default_server_name": "Servidor {count}",
-                "btn_select_log_folder": "Pasta de Logs",
+                "default_server_name": "Servidor {count}", "btn_select_log_folder": "Pasta de Logs",
                 "tooltip_select_log_folder": "Seleciona a pasta raiz onde os logs do servidor são armazenados.",
                 "btn_select_service": "Selecionar Serviço",
                 "tooltip_select_service": "Seleciona o serviço associado ao servidor (Windows ou Linux).",
                 "btn_start_service": "▶ Iniciar Serviço",
                 "tooltip_start_service": "Tenta iniciar o serviço selecionado.",
-                "btn_stop_service": "■ Parar Serviço",
-                "tooltip_stop_service": "Tenta parar o serviço selecionado.",
-                "btn_refresh_status": "↻",
-                "tooltip_refresh_status": "Atualizar status do serviço selecionado.",
-                "lbl_log_folder_prefix": "Pasta Logs",
-                "lbl_service_prefix": "Serviço",
-                "status_none": "Nenhuma",
-                "status_invalid": "INVÁLIDA",
-                "status_not_found_short": "NÃO ENC.",
+                "btn_stop_service": "■ Parar Serviço", "tooltip_stop_service": "Tenta parar o serviço selecionado.",
+                "btn_refresh_status": "↻", "tooltip_refresh_status": "Atualizar status do serviço selecionado.",
+                "lbl_log_folder_prefix": "Pasta Logs", "lbl_service_prefix": "Serviço", "status_none": "Nenhuma",
+                "status_invalid": "INVÁLIDA", "status_not_found_short": "NÃO ENC.",
                 "status_not_found_long": "(Não encontrado!)",
-                "status_checking": "(Verificando...)",
-                "status_running_win": "(Rodando)",
+                "status_checking": "(Verificando...)", "status_running_win": "(Rodando)",
                 "status_stopped_win": "(Parado)",
-                "status_starting_win": "(Iniciando...)",
-                "status_stopping_win": "(Parando...)",
+                "status_starting_win": "(Iniciando...)", "status_stopping_win": "(Parando...)",
                 "status_error": "(Erro!)",
-                "status_unknown": "(Desconhecido)",
-                "status_active_linux": "(Ativo)",
+                "status_unknown": "(Desconhecido)", "status_active_linux": "(Ativo)",
                 "status_inactive_linux": "(Inativo)",
-                "status_failed_linux": "(Falhou)",
-                "status_activating_linux": "(Ativando...)",
+                "status_failed_linux": "(Falhou)", "status_activating_linux": "(Ativando...)",
                 "status_deactivating_linux": "(Desativando...)",
-                "na_pywin32": "N/A (pywin32)",
-                "na_systemctl": "N/A (systemctl)",
-                "na_os": "N/A (SO {os})",
-                "lbl_log_controls": "Controles de Log",
-                "lbl_filter": "Filtro:",
+                "na_pywin32": "N/A (pywin32)", "na_systemctl": "N/A (systemctl)", "na_os": "N/A (SO {os})",
+                "lbl_log_controls": "Controles de Log", "lbl_filter": "Filtro:",
                 "tooltip_filter": "Filtra novas linhas de log (case-insensitive).",
-                "btn_pause": "⏸️ Pausar",
-                "btn_resume": "▶️ Retomar",
+                "btn_pause": "⏸️ Pausar", "btn_resume": "▶️ Retomar",
                 "tooltip_pause_resume": "Pausa ou retoma o acompanhamento ao vivo dos logs.",
-                "btn_clear_log": "♻️ Limpar",
-                "tooltip_clear_log": "Limpa a área de exibição de logs do servidor.",
+                "btn_clear_log": "♻️ Limpar", "tooltip_clear_log": "Limpa a área de exibição de logs do servidor.",
                 "btn_restart_monitor": "↻ Mon.",
                 "tooltip_restart_monitor": "Força o reinício do monitor de logs desta aba.",
-                "lbl_server_logs": "Logs do Servidor",
-                "lbl_live_log": "LOG AO VIVO DO SERVIDOR",
+                "lbl_server_logs": "Logs do Servidor", "lbl_live_log": "LOG AO VIVO DO SERVIDOR",
                 "lbl_search": "Buscar:",
-                "btn_next": "Próximo",
-                "btn_previous": "Anterior",
-                "btn_close_search": "X",
+                "btn_next": "Próximo", "btn_previous": "Anterior", "btn_close_search": "X",
                 "chk_auto_scroll": "Rolar Auto.",
-                "chk_system_log_auto_scroll": "Rolar Auto.",
-                "lbl_stop_delay": "Delay Parar Serviço (s):",
+                "chk_system_log_auto_scroll": "Rolar Auto.", "lbl_stop_delay": "Delay Parar Serviço (s):",
                 "tooltip_stop_delay_win": "Tempo (s) para aguardar após comando de parada do serviço.",
                 "lbl_start_delay": "Delay Iniciar Serviço (s):",
                 "tooltip_start_delay_win": "Tempo (s) para aguardar o serviço iniciar completamente.",
@@ -222,8 +210,7 @@ class I18N:
                 "dialog_invalid_action_msg": "Selecione uma aba de servidor para realizar esta ação.",
                 "dialog_theme_error_title": "Erro de Tema",
                 "dialog_theme_error_msg": "Não foi possível aplicar o tema '{theme}'.",
-                "dialog_save_error_title": "Erro ao Salvar",
-                "dialog_save_error_msg": "Erro: {error}",
+                "dialog_save_error_title": "Erro ao Salvar", "dialog_save_error_msg": "Erro: {error}",
                 "warn_no_service_selected_title": "Nenhum Serviço",
                 "warn_no_service_to_stop": "Selecione um serviço para parar.",
                 "warn_no_service_to_start": "Selecione um serviço para iniciar.",
@@ -250,18 +237,15 @@ class I18N:
                 "dialog_missing_pywin32": "pywin32 é necessário para listar serviços do Windows.",
                 "dialog_missing_systemctl": "systemctl é necessário para listar serviços do Linux.",
                 "dialog_loading_services_title": "Carregando Serviços ({os})",
-                "dialog_loading_services_msg": "Aguarde...",
-                "dialog_wmi_error_title": "Erro WMI",
+                "dialog_loading_services_msg": "Aguarde...", "dialog_wmi_error_title": "Erro WMI",
                 "dialog_wmi_error_msg": "Falha ao listar serviços: {error}",
                 "dialog_systemctl_error_title": "Erro systemctl",
                 "dialog_systemctl_error_msg": "Falha ao listar serviços: {error}",
                 "dialog_no_services_found_title": "Nenhum Serviço",
                 "dialog_no_services_found_msg": "Nenhum serviço gerenciável encontrado para {os}.",
                 "dialog_select_service_title": "Selecionar Serviço para '{server}'",
-                "dialog_service_name_header": "Nome do Serviço ({os})",
-                "btn_confirm": "Confirmar",
+                "dialog_service_name_header": "Nome do Serviço ({os})", "btn_confirm": "Confirmar",
                 "btn_cancel": "Cancelar",
-                # Restarter Tab
                 "restarter_tab_paths_and_service": "Configuração de Caminhos e Serviço",
                 "restarter_tab_options": "Opções de Reinício (Gatilho)",
                 "restarter_tab_scheduled": "Reinícios Agendados",
@@ -275,8 +259,7 @@ class I18N:
                 "restarter_scheduled_custom": "Horários Personalizados (HH:MM)",
                 "restarter_scheduled_new": "Novo (HH:MM):",
                 "tooltip_restarter_custom_time": "Digite o horário no formato HH:MM (ex: 08:30, 22:15)",
-                "restarter_btn_add": "+ Adicionar",
-                "restarter_btn_remove": "- Remover Selecionado",
+                "restarter_btn_add": "+ Adicionar", "restarter_btn_remove": "- Remover Selecionado",
                 "tooltip_restarter_btn_remove": "Remove o horário personalizado selecionado na lista.",
                 "dialog_invalid_time_format_title": "Formato Inválido",
                 "dialog_invalid_time_format_msg": "Horário '{time}' inválido. Use o formato HH:MM.",
@@ -294,21 +277,17 @@ class I18N:
                 "dialog_restart_failed_msg": "Ocorreu um erro ao reiniciar o serviço '{service}'.",
                 "log_restart_abort": "Falha ao parar '{service}'. Abortando reinício.",
                 "log_wait_after_stop": "Aguardando {delay}s após a parada...",
-                "log_wait_after_start": "Aguardando {delay}s após o início...",
-                "restart_type_scheduled": "agendado",
+                "log_wait_after_start": "Aguardando {delay}s após o início...", "restart_type_scheduled": "agendado",
                 "restart_type_trigger": "por gatilho de log",
-                # Votemap Tab
                 "votemap_tab_paths_and_service": "Configuração de Caminhos e Serviço",
                 "btn_select_server_json": "JSON Servidor",
                 "tooltip_select_server_json": "Seleciona o arquivo JSON de configuração principal do servidor (ex: config.json).",
                 "btn_select_votemap_json": "JSON Votemap",
                 "tooltip_select_votemap_json": "Seleciona o arquivo JSON de configuração do Votemap (ex: votemap.json).",
-                "lbl_server_json_prefix": "JSON Servidor",
-                "lbl_votemap_json_prefix": "JSON Votemap",
+                "lbl_server_json_prefix": "JSON Servidor", "lbl_votemap_json_prefix": "JSON Votemap",
                 "btn_refresh_jsons": "Atualizar JSONs",
                 "tooltip_btn_refresh_jsons": "Recarrega e exibe o conteúdo dos arquivos JSON selecionados.",
-                "tab_json_server": "JSON Servidor",
-                "tab_json_votemap": "JSON Votemap",
+                "tab_json_server": "JSON Servidor", "tab_json_votemap": "JSON Votemap",
                 "lbl_content_json_server": "CONTEÚDO DO JSON DO SERVIDOR",
                 "lbl_content_json_votemap": "CONTEÚDO DO JSON DO VOTEMAP",
                 "tab_votemap_options": "Opções Votemap",
@@ -322,24 +301,19 @@ class I18N:
                 "tooltip_votemap_default_mission": "ID do cenário a ser carregado para iniciar uma nova votação.",
                 "lbl_log_filename": "Nome do arquivo de log:",
                 "tooltip_log_filename": "Nome do arquivo de log a ser monitorado (ex: console.log).",
-                "lbl_stop_delay_short": "Delay Parar (s):",
-                "lbl_start_delay_short": "Delay Iniciar (s):",
+                "lbl_stop_delay_short": "Delay Parar (s):", "lbl_start_delay_short": "Delay Iniciar (s):",
                 "dialog_select_server_json_title": "Selecionar JSON de Config. do Servidor para '{server}'",
                 "dialog_select_votemap_json_title": "Selecionar JSON de Votemap para '{server}'",
-                "json_file_filter_name": "Arquivos JSON",
-                "all_files_filter_name": "Todos",
+                "json_file_filter_name": "Arquivos JSON", "all_files_filter_name": "Todos",
                 "log_warn_invalid_folder": "AVISO: Pasta de logs '{folder}' inválida.",
                 "log_monitoring_file": "\n>>> Monitorando: {file}\n",
-                "json_display_error": "ERRO: {error}",
-                "json_decode_error": "ERRO ao decodificar JSON: {error}",
-                "json_display_not_found": "Arquivo não encontrado.",
-                "json_display_not_configured": "Não configurado.",
+                "json_display_error": "ERRO: {error}", "json_decode_error": "ERRO ao decodificar JSON: {error}",
+                "json_display_not_found": "Arquivo não encontrado.", "json_display_not_configured": "Não configurado.",
                 "dialog_unsupported_os_votemap": "Gerenciamento de serviços não suportado no {os}.",
                 "log_regex_error": "ERRO DE REGEX: {error}",
                 "log_error_jsons_not_configured": "ERRO: JSONs de servidor ou votemap não configurados.",
                 "log_warn_empty_map_list": "AVISO: Lista de mapas vazia.",
-                "log_random_vote": "VOTO ALEATÓRIO: '{map}'.",
-                "log_winner_map": "MAPA VENCEDOR: '{map}'.",
+                "log_random_vote": "VOTO ALEATÓRIO: '{map}'.", "log_winner_map": "MAPA VENCEDOR: '{map}'.",
                 "log_error_invalid_winner_index": "ERRO: Índice do vencedor ({index}) inválido.",
                 "log_server_json_updated": "JSON do servidor atualizado para: {map}",
                 "log_auto_restart_starting": "Iniciando reinício automático...",
@@ -352,43 +326,37 @@ class I18N:
                 "log_restoring_json": "Restaurando JSON para votemap...",
                 "log_warn_json_not_restored": "AVISO: JSON não restaurado (config incompleta).",
                 "log_json_restored": "JSON restaurado.",
-                "log_error_restoring_json": "ERRO ao restaurar JSON: {error}",
-                "ok": "OK",
+                "log_error_restoring_json": "ERRO ao restaurar JSON: {error}", "ok": "OK",
+                # NOVO: Traduções para o sistema de notificação
+                "notification_center_title": "Central de Notificações",
+                "clear_notifications": "Limpar Histórico",
+                "no_notifications": "Nenhuma notificação.",
+                "closing_in": " (Fechando em {s}s)",
+                "notification_cleared": "Histórico de notificações limpo.",
+                "col_time": "Horário",
+                "col_type": "Tipo",
+                "col_title": "Título",
+                "col_message": "Mensagem",
             },
             'en-us': {
                 # Main App & Menus
-                "app_title": "PQDT_Raphael - ArmaServerToolbox",
-                "menu_language": "Language",
-                "menu_file": "File",
-                "menu_save_config": "Save Configuration",
-                "menu_exit": "Exit",
-                "menu_restarter": "Auto-Restarter",
-                "menu_add_server": "Add Server",
-                "menu_rename_server": "Rename Server",
-                "menu_remove_current_server": "Remove Current Server",
-                "menu_votemap": "Votemap Bypass",
-                "menu_tools": "Tools",
-                "menu_change_theme": "Change Theme",
-                "menu_help": "Help",
-                "menu_about": "About",
-                # Tabs
-                "tab_top_restarter": "Auto-Restarter",
-                "tab_top_votemap": "Votemap Bypass",
+                "app_title": "PQDT_Raphael - ArmaServerToolbox", "menu_language": "Language", "menu_file": "File",
+                "menu_save_config": "Save Configuration", "menu_exit": "Exit", "menu_restarter": "Auto-Restarter",
+                "menu_add_server": "Add Server", "menu_rename_server": "Rename Server",
+                "menu_remove_current_server": "Remove Current Server", "menu_votemap": "Votemap Bypass",
+                "menu_tools": "Tools", "menu_change_theme": "Change Theme", "menu_help": "Help", "menu_about": "About",
+                "tab_top_restarter": "Auto-Restarter", "tab_top_votemap": "Votemap Bypass",
                 "tab_system_log": "System Log",
-                # Status Bar
-                "status_ready": "Ready.",
-                "status_config_saved": "Configuration saved!",
+                "status_ready": "Ready.", "status_config_saved": "Configuration saved!",
                 "status_service_selected": "Service '{service}' selected for '{server}'.",
                 "status_server_removed": "Server '{server}' ({tool}) removed.",
                 "status_server_renamed": "Server renamed to '{name}'.",
-                # Dialogs
                 "dialog_rename_server_title": "Rename '{server}'",
                 "dialog_rename_server_prompt": "Enter the new name for the server:",
                 "dialog_rename_error_empty_title": "Invalid Name",
                 "dialog_rename_error_empty_msg": "The server name cannot be empty.",
                 "dialog_rename_error_duplicate_title": "Duplicate Name",
                 "dialog_rename_error_duplicate_msg": "The name '{name}' is already in use in this tool.",
-                # About Dialog (already bilingual)
                 "about_title": "Sobre / About",
                 "about_message": (
                     "Esta é uma aplicação unificada que combina as funcionalidades do Auto-Restarter e do Votemap Bypass.\n\n"
@@ -401,58 +369,35 @@ class I18N:
                     "Each tool can manage multiple servers in its own internal tabs.\n\n"
                     "Developed by PQDT_Raphael for Predadores Brasil and KOTH Reforged community."
                 ),
-                # Generic & Shared
-                "default_server_name": "Server {count}",
-                "btn_select_log_folder": "Logs Folder",
+                "default_server_name": "Server {count}", "btn_select_log_folder": "Logs Folder",
                 "tooltip_select_log_folder": "Selects the root folder where server logs are stored.",
                 "btn_select_service": "Select Service",
                 "tooltip_select_service": "Selects the service associated with the server (Windows or Linux).",
-                "btn_start_service": "▶ Start Service",
-                "tooltip_start_service": "Tries to start the selected service.",
-                "btn_stop_service": "■ Stop Service",
-                "tooltip_stop_service": "Tries to stop the selected service.",
-                "btn_refresh_status": "↻",
-                "tooltip_refresh_status": "Refresh status of the selected service.",
-                "lbl_log_folder_prefix": "Logs Folder",
-                "lbl_service_prefix": "Service",
-                "status_none": "None",
-                "status_invalid": "INVALID",
-                "status_not_found_short": "NOT FND.",
+                "btn_start_service": "▶ Start Service", "tooltip_start_service": "Tries to start the selected service.",
+                "btn_stop_service": "■ Stop Service", "tooltip_stop_service": "Tries to stop the selected service.",
+                "btn_refresh_status": "↻", "tooltip_refresh_status": "Refresh status of the selected service.",
+                "lbl_log_folder_prefix": "Logs Folder", "lbl_service_prefix": "Service", "status_none": "None",
+                "status_invalid": "INVALID", "status_not_found_short": "NOT FND.",
                 "status_not_found_long": "(Not found!)",
-                "status_checking": "(Checking...)",
-                "status_running_win": "(Running)",
+                "status_checking": "(Checking...)", "status_running_win": "(Running)",
                 "status_stopped_win": "(Stopped)",
-                "status_starting_win": "(Starting...)",
-                "status_stopping_win": "(Stopping...)",
+                "status_starting_win": "(Starting...)", "status_stopping_win": "(Stopping...)",
                 "status_error": "(Error!)",
-                "status_unknown": "(Unknown)",
-                "status_active_linux": "(Active)",
-                "status_inactive_linux": "(Inactive)",
-                "status_failed_linux": "(Failed)",
-                "status_activating_linux": "(Activating...)",
+                "status_unknown": "(Unknown)", "status_active_linux": "(Active)", "status_inactive_linux": "(Inactive)",
+                "status_failed_linux": "(Failed)", "status_activating_linux": "(Activating...)",
                 "status_deactivating_linux": "(Deactivating...)",
-                "na_pywin32": "N/A (pywin32)",
-                "na_systemctl": "N/A (systemctl)",
-                "na_os": "N/A (OS {os})",
-                "lbl_log_controls": "Log Controls",
-                "lbl_filter": "Filter:",
+                "na_pywin32": "N/A (pywin32)", "na_systemctl": "N/A (systemctl)", "na_os": "N/A (OS {os})",
+                "lbl_log_controls": "Log Controls", "lbl_filter": "Filter:",
                 "tooltip_filter": "Filters new log lines (case-insensitive).",
-                "btn_pause": "⏸️ Pause",
-                "btn_resume": "▶️ Resume",
+                "btn_pause": "⏸️ Pause", "btn_resume": "▶️ Resume",
                 "tooltip_pause_resume": "Pauses or resumes live log monitoring.",
-                "btn_clear_log": "♻️ Clear",
-                "tooltip_clear_log": "Clears the server log display area.",
+                "btn_clear_log": "♻️ Clear", "tooltip_clear_log": "Clears the server log display area.",
                 "btn_restart_monitor": "↻ Mon.",
                 "tooltip_restart_monitor": "Forces a restart of this tab's log monitor.",
-                "lbl_server_logs": "Server Logs",
-                "lbl_live_log": "LIVE SERVER LOG",
-                "lbl_search": "Search:",
-                "btn_next": "Next",
-                "btn_previous": "Previous",
-                "btn_close_search": "X",
+                "lbl_server_logs": "Server Logs", "lbl_live_log": "LIVE SERVER LOG", "lbl_search": "Search:",
+                "btn_next": "Next", "btn_previous": "Previous", "btn_close_search": "X",
                 "chk_auto_scroll": "Auto-scroll",
-                "chk_system_log_auto_scroll": "Auto-scroll",
-                "lbl_stop_delay": "Stop Service Delay (s):",
+                "chk_system_log_auto_scroll": "Auto-scroll", "lbl_stop_delay": "Stop Service Delay (s):",
                 "tooltip_stop_delay_win": "Time (s) to wait after the service stop command.",
                 "lbl_start_delay": "Start Service Delay (s):",
                 "tooltip_start_delay_win": "Time (s) to wait for the service to fully start.",
@@ -463,10 +408,8 @@ class I18N:
                 "dialog_remove_server_msg": "Are you sure you want to remove the server '{server}' from the {tool}?",
                 "dialog_invalid_action_title": "Invalid Action",
                 "dialog_invalid_action_msg": "Select a server tab to perform this action.",
-                "dialog_theme_error_title": "Theme Error",
-                "dialog_theme_error_msg": "Could not apply theme '{theme}'.",
-                "dialog_save_error_title": "Error Saving",
-                "dialog_save_error_msg": "Error: {error}",
+                "dialog_theme_error_title": "Theme Error", "dialog_theme_error_msg": "Could not apply theme '{theme}'.",
+                "dialog_save_error_title": "Error Saving", "dialog_save_error_msg": "Error: {error}",
                 "warn_no_service_selected_title": "No Service Selected",
                 "warn_no_service_to_stop": "Select a service to stop.",
                 "warn_no_service_to_start": "Select a service to start.",
@@ -493,18 +436,14 @@ class I18N:
                 "dialog_missing_pywin32": "pywin32 is required to list Windows services.",
                 "dialog_missing_systemctl": "systemctl is required to list Linux services.",
                 "dialog_loading_services_title": "Loading Services ({os})",
-                "dialog_loading_services_msg": "Please wait...",
-                "dialog_wmi_error_title": "WMI Error",
+                "dialog_loading_services_msg": "Please wait...", "dialog_wmi_error_title": "WMI Error",
                 "dialog_wmi_error_msg": "Failed to list services: {error}",
                 "dialog_systemctl_error_title": "systemctl Error",
                 "dialog_systemctl_error_msg": "Failed to list services: {error}",
                 "dialog_no_services_found_title": "No Services Found",
                 "dialog_no_services_found_msg": "No manageable services found for {os}.",
                 "dialog_select_service_title": "Select Service for '{server}'",
-                "dialog_service_name_header": "Service Name ({os})",
-                "btn_confirm": "Confirm",
-                "btn_cancel": "Cancel",
-                # Restarter Tab
+                "dialog_service_name_header": "Service Name ({os})", "btn_confirm": "Confirm", "btn_cancel": "Cancel",
                 "restarter_tab_paths_and_service": "Paths and Service Configuration",
                 "restarter_tab_options": "Restart Options (Trigger)",
                 "restarter_tab_scheduled": "Scheduled Restarts",
@@ -518,15 +457,13 @@ class I18N:
                 "restarter_scheduled_custom": "Custom Times (HH:MM)",
                 "restarter_scheduled_new": "New (HH:MM):",
                 "tooltip_restarter_custom_time": "Enter the time in HH:MM format (e.g., 08:30, 22:15)",
-                "restarter_btn_add": "+ Add",
-                "restarter_btn_remove": "- Remove Selected",
+                "restarter_btn_add": "+ Add", "restarter_btn_remove": "- Remove Selected",
                 "tooltip_restarter_btn_remove": "Removes the selected custom time from the list.",
                 "dialog_invalid_time_format_title": "Invalid Format",
                 "dialog_invalid_time_format_msg": "Time '{time}' is invalid. Use HH:MM format.",
                 "dialog_duplicate_time_title": "Duplicate Time",
                 "dialog_duplicate_time_msg": "The time '{time}' is already in the list.",
-                "dialog_no_selection_title": "No Selection",
-                "dialog_no_selection_msg": "Select a time to remove.",
+                "dialog_no_selection_title": "No Selection", "dialog_no_selection_msg": "Select a time to remove.",
                 "log_scheduled_restart_triggered": "--- SCHEDULED RESTART ({time}) INITIATED ---",
                 "log_trigger_detected": "Trigger detected. Waiting {delay}s...",
                 "log_error_no_service_for_restart": "ERROR: Service name not configured for {type} restart.",
@@ -537,23 +474,18 @@ class I18N:
                 "dialog_restart_failed_msg": "An error occurred while restarting service '{service}'.",
                 "log_restart_abort": "Failed to stop '{service}'. Aborting restart.",
                 "log_wait_after_stop": "Waiting {delay}s after stop...",
-                "log_wait_after_start": "Waiting {delay}s after start...",
-                "restart_type_scheduled": "scheduled",
+                "log_wait_after_start": "Waiting {delay}s after start...", "restart_type_scheduled": "scheduled",
                 "restart_type_trigger": "by log trigger",
-                # Votemap Tab
                 "votemap_tab_paths_and_service": "Paths and Service Configuration",
                 "btn_select_server_json": "Server JSON",
                 "tooltip_select_server_json": "Selects the main server configuration JSON file (e.g., config.json).",
                 "btn_select_votemap_json": "Votemap JSON",
                 "tooltip_select_votemap_json": "Selects the Votemap configuration JSON file (e.g., votemap.json).",
-                "lbl_server_json_prefix": "Server JSON",
-                "lbl_votemap_json_prefix": "Votemap JSON",
+                "lbl_server_json_prefix": "Server JSON", "lbl_votemap_json_prefix": "Votemap JSON",
                 "btn_refresh_jsons": "Refresh JSONs",
                 "tooltip_btn_refresh_jsons": "Reloads and displays the content of the selected JSON files.",
-                "tab_json_server": "Server JSON",
-                "tab_json_votemap": "Votemap JSON",
-                "lbl_content_json_server": "SERVER JSON CONTENT",
-                "lbl_content_json_votemap": "VOTEMAP JSON CONTENT",
+                "tab_json_server": "Server JSON", "tab_json_votemap": "Votemap JSON",
+                "lbl_content_json_server": "SERVER JSON CONTENT", "lbl_content_json_votemap": "VOTEMAP JSON CONTENT",
                 "tab_votemap_options": "Votemap Options",
                 "votemap_chk_auto_restart": "Automatically restart server after map change",
                 "tooltip_votemap_chk_auto_restart": "If checked, the server will be restarted after a successful map vote.",
@@ -565,24 +497,19 @@ class I18N:
                 "tooltip_votemap_default_mission": "ID of the scenario to be loaded to start a new vote.",
                 "lbl_log_filename": "Log filename:",
                 "tooltip_log_filename": "Name of the log file to monitor (e.g., console.log).",
-                "lbl_stop_delay_short": "Stop Delay (s):",
-                "lbl_start_delay_short": "Start Delay (s):",
+                "lbl_stop_delay_short": "Stop Delay (s):", "lbl_start_delay_short": "Start Delay (s):",
                 "dialog_select_server_json_title": "Select Server Config JSON for '{server}'",
                 "dialog_select_votemap_json_title": "Select Votemap JSON for '{server}'",
-                "json_file_filter_name": "JSON Files",
-                "all_files_filter_name": "All Files",
+                "json_file_filter_name": "JSON Files", "all_files_filter_name": "All Files",
                 "log_warn_invalid_folder": "WARNING: Log folder '{folder}' is invalid.",
                 "log_monitoring_file": "\n>>> Monitoring: {file}\n",
-                "json_display_error": "ERROR: {error}",
-                "json_decode_error": "ERROR decoding JSON: {error}",
-                "json_display_not_found": "File not found.",
-                "json_display_not_configured": "Not configured.",
+                "json_display_error": "ERROR: {error}", "json_decode_error": "ERROR decoding JSON: {error}",
+                "json_display_not_found": "File not found.", "json_display_not_configured": "Not configured.",
                 "dialog_unsupported_os_votemap": "Service management is not supported on {os}.",
                 "log_regex_error": "REGEX ERROR: {error}",
                 "log_error_jsons_not_configured": "ERROR: Server or votemap JSONs not configured.",
                 "log_warn_empty_map_list": "WARNING: Map list is empty.",
-                "log_random_vote": "RANDOM VOTE: '{map}'.",
-                "log_winner_map": "WINNING MAP: '{map}'.",
+                "log_random_vote": "RANDOM VOTE: '{map}'.", "log_winner_map": "WINNING MAP: '{map}'.",
                 "log_error_invalid_winner_index": "ERROR: Winner index ({index}) is invalid.",
                 "log_server_json_updated": "Server JSON updated to: {map}",
                 "log_auto_restart_starting": "Starting automatic restart...",
@@ -595,34 +522,76 @@ class I18N:
                 "log_restoring_json": "Restoring JSON to votemap...",
                 "log_warn_json_not_restored": "WARNING: JSON not restored (incomplete config).",
                 "log_json_restored": "JSON restored.",
-                "log_error_restoring_json": "ERROR restoring JSON: {error}",
-                "ok": "OK",
+                "log_error_restoring_json": "ERROR restoring JSON: {error}", "ok": "OK",
+                # NEW: Notification system translations
+                "notification_center_title": "Notification Center",
+                "clear_notifications": "Clear History",
+                "no_notifications": "No notifications.",
+                "closing_in": " (Closing in {s}s)",
+                "notification_cleared": "Notification history cleared.",
+                "col_time": "Time",
+                "col_type": "Type",
+                "col_title": "Title",
+                "col_message": "Message",
             }
         }
 
-    def set_language(self, language):
-        if language in self.translations:
-            self.language = language
-            app_logger.info(f"Idioma alterado para: {language}")
-        else:
-            app_logger.warning(f"Idioma '{language}' não encontrado. Mantendo '{self.language}'.")
 
-    def get(self, key, **kwargs):
-        try:
-            # Tenta obter a tradução para o idioma atual
-            val = self.translations[self.language].get(key, key)
-            if kwargs:
-                return val.format(**kwargs)
-            return val
-        except KeyError:
-            # Se o idioma não existir, usa inglês como padrão
-            val = self.translations['en-us'].get(key, key)
-            if kwargs:
-                return val.format(**kwargs)
-            return val
-        except Exception:
-            # Retorna a própria chave em caso de erro de formatação
-            return key
+# ==============================================================================
+# CLASSE NotificationToast - NOVA CLASSE PARA NOTIFICAÇÕES
+# ==============================================================================
+class NotificationToast(ttk.Toplevel):
+    def __init__(self, master_app, title, message, boxtype='info', duration=5):
+        super().__init__(master_app.root)
+        self.app = master_app
+        self.duration = duration
+        self.boxtype = boxtype
+
+        # Remove a barra de título
+        self.overrideredirect(True)
+
+        # Mapeia o tipo para uma cor do bootstrap
+        color_map = {'info': 'info', 'success': 'success', 'warning': 'warning', 'error': 'danger'}
+        style_color = color_map.get(boxtype, 'secondary')
+
+        # Frame principal com borda colorida
+        self.container = ttk.Frame(self, bootstyle=f'{style_color}', padding=1)
+        self.container.pack(expand=True, fill='both')
+
+        inner_frame = ttk.Frame(self.container, padding=(10, 5))
+        inner_frame.pack(expand=True, fill='both')
+
+        # Título da Notificação
+        title_label = ttk.Label(inner_frame, text=title, font=("-weight bold",))
+        title_label.pack(side='top', fill='x')
+
+        ttk.Separator(inner_frame).pack(side='top', fill='x', pady=5)
+
+        # Mensagem da Notificação
+        msg_label = ttk.Label(inner_frame, text=message, wraplength=380)
+        msg_label.pack(side='top', fill='x', pady=(0, 5))
+
+        # Label para a contagem regressiva
+        self.countdown_label_var = tk.StringVar()
+        countdown_label = ttk.Label(inner_frame, textvariable=self.countdown_label_var, font=("-size 7",))
+        countdown_label.pack(side='bottom', fill='x', anchor='e')
+
+        self.update_idletasks()
+        self.countdown(self.duration)
+
+    def countdown(self, seconds_left):
+        _ = self.app.translator.get
+        if seconds_left > 0:
+            self.countdown_label_var.set(_('closing_in', s=seconds_left))
+            self.after_id = self.after(1000, lambda: self.countdown(seconds_left - 1))
+        else:
+            self.close_toast()
+
+    def close_toast(self):
+        if hasattr(self, 'after_id'):
+            self.after_cancel(self.after_id)
+        self.app.on_toast_closed(self)
+        self.destroy()
 
 
 # ==============================================================================
@@ -1227,9 +1196,9 @@ class RestarterTab(ttk.Frame):
             output_lower = output_text.lower()
             if any(err in output_lower for err in
                    ["failed 1060", "falha 1060", "does not exist as an installed service"]): return "NOT_FOUND"
-            if "state" not in output_lower: return "ERROR"
-            if "running" in output_lower: return "RUNNING"
-            if "stopped" in output_lower: return "STOPPED"
+            if "state" not in output_lower and "estado" not in output_lower: return "ERROR"
+            if "running" in output_lower or "em execução" in output_lower: return "RUNNING"
+            if "stopped" in output_lower or "parado" in output_lower: return "STOPPED"
             if "start_pending" in output_lower: return "START_PENDING"
             if "stop_pending" in output_lower: return "STOP_PENDING"
             return "UNKNOWN"
@@ -1288,14 +1257,9 @@ class RestarterTab(ttk.Frame):
         """Para e reinicia o monitor de logs. Usado pelo botão '↻ Mon.'."""
         self.logger.info(f"Restarter [{self.nome}]: Manual log monitor restart triggered.")
         self.stop_log_monitoring()
-        # Pequena espera para garantir que a thread antiga realmente terminou antes de iniciar a nova
         self.app.root.after(100, self.start_log_monitoring)
 
     def _log_processing_worker(self):
-        """
-        Thread de trabalho única que encontra o log mais recente, o abre e processa
-        novas linhas continuamente, lidando com a rotação de arquivos de log.
-        """
         self.logger.info(f"Restarter [{self.nome}]: Log processing worker started.")
         caminho_log_atual = None
         file_handle = None
@@ -1350,7 +1314,6 @@ class RestarterTab(ttk.Frame):
         self.logger.info(f"Restarter [{self.nome}]: Log processing worker stopped.")
 
     def _process_log_line(self, linha, current_filter):
-        """Processa uma única linha de log para a lógica do Restarter."""
         if not current_filter or current_filter in linha.lower():
             self.append_text_to_log_area(linha)
 
@@ -1392,7 +1355,7 @@ class RestarterTab(ttk.Frame):
         success = self._operar_servico_com_delays(nome_servico)
         if self.app.root.winfo_exists():
             if success:
-                self.app.show_messagebox_from_thread("info", _("dialog_server_restarted_title", server=self.nome),
+                self.app.show_messagebox_from_thread("success", _("dialog_server_restarted_title", server=self.nome),
                                                      _("dialog_server_restarted_msg", service=nome_servico))
             else:
                 self.app.show_messagebox_from_thread("error", _("dialog_restart_failed_title", server=self.nome),
@@ -1422,7 +1385,7 @@ class RestarterTab(ttk.Frame):
         self.append_text_to_log_area_threadsafe(_("log_manual_stop", service=service_name) + "\n")
         success = self._stop_service(service_name)
         if success:
-            self.app.show_messagebox_from_thread("info", _("info_service_stopped_title"),
+            self.app.show_messagebox_from_thread("success", _("info_service_stopped_title"),
                                                  _("info_service_stopped_msg", service=service_name))
         else:
             self.app.show_messagebox_from_thread("error", _("error_service_stop_failed_title"),
@@ -1434,7 +1397,7 @@ class RestarterTab(ttk.Frame):
         self.append_text_to_log_area_threadsafe(_("log_manual_start", service=service_name) + "\n")
         success = self._start_service(service_name)
         if success:
-            self.app.show_messagebox_from_thread("info", _("info_service_started_title"),
+            self.app.show_messagebox_from_thread("success", _("info_service_started_title"),
                                                  _("info_service_started_msg", service=service_name))
         else:
             self.app.show_messagebox_from_thread("error", _("error_service_start_failed_title"),
@@ -2105,7 +2068,6 @@ class VotemapTab(ttk.Frame):
             return "ERROR"
 
     def start_log_monitoring(self):
-        """Inicia a thread única de monitoramento e processamento de logs."""
         if self.log_monitor_thread and self.log_monitor_thread.is_alive():
             return
 
@@ -2123,7 +2085,6 @@ class VotemapTab(ttk.Frame):
         self.log_monitor_thread.start()
 
     def stop_log_monitoring(self, from_tab_closure=False):
-        """Para a thread de monitoramento de logs de forma segura."""
         self._stop_event.set()
         if self.log_monitor_thread and self.log_monitor_thread.is_alive():
             if self.log_monitor_thread != threading.current_thread():
@@ -2131,16 +2092,11 @@ class VotemapTab(ttk.Frame):
         self.log_monitor_thread = None
 
     def restart_log_monitoring(self):
-        """Para e reinicia o monitor de logs. Usado pelo botão '↻ Mon.'."""
         self.logger.info(f"Votemap [{self.nome}]: Manual log monitor restart triggered.")
         self.stop_log_monitoring()
         self.app.root.after(100, self.start_log_monitoring)
 
     def _log_processing_worker(self):
-        """
-        Thread de trabalho única que encontra o log mais recente, o abre e processa
-        novas linhas continuamente, lidando com a rotação de arquivos de log.
-        """
         self.logger.info(f"Votemap [{self.nome}]: Log processing worker started.")
         caminho_log_atual = None
         file_handle = None
@@ -2148,7 +2104,6 @@ class VotemapTab(ttk.Frame):
 
         while not self._stop_event.is_set():
             try:
-                # Compila RegEx se ainda não tiver sido compilado
                 if vote_pattern is None:
                     vote_pattern = re.compile(self.vote_pattern_var.get())
                     winner_pattern = re.compile(self.winner_pattern_var.get())
@@ -2201,11 +2156,11 @@ class VotemapTab(ttk.Frame):
             if self._stop_event.wait(0.2):
                 break
 
-        if file_handle: file_handle.close()
+        if file_handle:
+            file_handle.close()
         self.logger.info(f"Votemap [{self.nome}]: Log processing worker stopped.")
 
     def _process_log_line(self, linha, current_filter, vote_pattern, winner_pattern):
-        """Processa uma única linha de log para a lógica do Votemap."""
         if not current_filter or current_filter in linha.lower():
             self.append_text_to_log_area(linha)
 
@@ -2311,7 +2266,7 @@ class VotemapTab(ttk.Frame):
         success = self._executar_logica_reinicio_servico(nome_servico)
         if self.app.root.winfo_exists():
             if success:
-                self.app.show_messagebox_from_thread("info", _("dialog_restart_complete_title", server=self.nome),
+                self.app.show_messagebox_from_thread("success", _("dialog_restart_complete_title", server=self.nome),
                                                      _("dialog_restart_complete_msg", service=nome_servico))
             else:
                 self.app.show_messagebox_from_thread("error",
@@ -2342,7 +2297,7 @@ class VotemapTab(ttk.Frame):
         self.append_text_to_log_area_threadsafe(_("log_manual_stop", service=service_name) + "\n")
         success = self._stop_service(service_name)
         if success:
-            self.app.show_messagebox_from_thread("info", _("info_service_stopped_title"),
+            self.app.show_messagebox_from_thread("success", _("info_service_stopped_title"),
                                                  _("info_service_stopped_msg", service=service_name))
         else:
             self.app.show_messagebox_from_thread("error", _("error_service_stop_failed_title"),
@@ -2354,7 +2309,7 @@ class VotemapTab(ttk.Frame):
         self.append_text_to_log_area_threadsafe(_("log_manual_start", service=service_name) + "\n")
         success = self._start_service(service_name)
         if success:
-            self.app.show_messagebox_from_thread("info", _("info_service_started_title"),
+            self.app.show_messagebox_from_thread("success", _("info_service_started_title"),
                                                  _("info_service_started_msg", service=service_name))
         else:
             self.app.show_messagebox_from_thread("error", _("error_service_start_failed_title"),
@@ -2526,15 +2481,19 @@ class UnifiedMultiToolApp:
         self.style = ttk.Style()
         self.config_file = "unified_config.json"
         self.config = self._load_app_config_from_file()
-        self._shutting_down = False  # Flag para controle de encerramento
+        self._shutting_down = False
 
-        # Inicializa o tradutor
         self.translator = I18N()
         self.translator.set_language(self.config.get("language", "pt-br"))
         _ = self.translator.get
 
         self.root.title(_("app_title"))
         self.root.geometry("1024x768")
+
+        # --- NOVO: Atributos da Central de Notificações ---
+        self.notifications_history = deque(maxlen=100)  # Limita a 100 notificações
+        self.unread_notifications = tk.IntVar(value=0)
+        self.active_toasts = []
 
         try:
             self.style.theme_use(self.config.get("theme", "darkly"))
@@ -2557,7 +2516,7 @@ class UnifiedMultiToolApp:
         self._setup_background_image()
         self.create_main_widgets()
         self.create_menu()
-        self.create_status_bar()
+        self.create_status_bar()  # Modificado para incluir o sino
         self.update_ui_text()
         self.inicializar_modulos_das_configuracoes()
 
@@ -2567,6 +2526,9 @@ class UnifiedMultiToolApp:
         self.root.bind("<Configure>", self._on_root_configure)
         self.root.protocol("WM_DELETE_WINDOW", self.minimize_to_tray_on_close)
 
+        # NOVO: Trace para atualizar a badge do sino
+        self.unread_notifications.trace_add("write", self._update_bell_badge)
+
         if PYSTRAY_AVAILABLE: self.setup_tray_icon()
 
     def create_main_widgets(self):
@@ -2575,7 +2537,6 @@ class UnifiedMultiToolApp:
         self.top_level_notebook = ttk.Notebook(self.root)
         self.top_level_notebook.pack(fill='both', expand=True, padx=5, pady=5)
 
-        # --- Frame do Restarter ---
         self.restarter_frame = ttk.Frame(self.top_level_notebook)
         self.top_level_notebook.add(self.restarter_frame)
         self.restarter_notebook = ttk.Notebook(self.restarter_frame)
@@ -2583,7 +2544,7 @@ class UnifiedMultiToolApp:
         self.restarter_notebook.bind('<Double-1>', self._on_tab_double_click)
 
         self.restarter_system_log_frame = ttk.Frame(self.restarter_notebook)
-        self.restarter_notebook.add(self.restarter_system_log_frame, text="Log do Sistema")  # Placeholder
+        self.restarter_notebook.add(self.restarter_system_log_frame, text="Log do Sistema")
         self.restarter_system_log_area = ScrolledText(self.restarter_system_log_frame, wrap='word', height=10,
                                                       state='disabled')
         self.restarter_system_log_area.pack(fill='both', expand=True, padx=5, pady=5)
@@ -2598,7 +2559,6 @@ class UnifiedMultiToolApp:
         )
         self.restarter_autoscroll_check.pack(side='left')
 
-        # --- Frame do Votemap ---
         self.votemap_frame = ttk.Frame(self.top_level_notebook)
         self.top_level_notebook.add(self.votemap_frame)
         self.votemap_notebook = ttk.Notebook(self.votemap_frame)
@@ -2606,7 +2566,7 @@ class UnifiedMultiToolApp:
         self.votemap_notebook.bind('<Double-1>', self._on_tab_double_click)
 
         self.votemap_system_log_frame = ttk.Frame(self.votemap_notebook)
-        self.votemap_notebook.add(self.votemap_system_log_frame, text="Log do Sistema")  # Placeholder
+        self.votemap_notebook.add(self.votemap_system_log_frame, text="Log do Sistema")
         self.votemap_system_log_area = ScrolledText(self.votemap_system_log_frame, wrap='word', height=10,
                                                     state='disabled')
         self.votemap_system_log_area.pack(fill='both', expand=True, padx=5, pady=5)
@@ -2664,7 +2624,6 @@ class UnifiedMultiToolApp:
         return final_nome
 
     def _get_active_tab_info(self):
-        """Retorna o notebook ativo, a lista de servidores e a aba selecionada."""
         try:
             active_tool_frame = self.top_level_notebook.nametowidget(self.top_level_notebook.select())
             if active_tool_frame == self.restarter_frame:
@@ -2675,6 +2634,7 @@ class UnifiedMultiToolApp:
                 return None, None, None
 
             tab_id = notebook.select()
+            if not tab_id: return None, None, None  # Se nenhuma sub-aba estiver selecionada
             current_tab = notebook.nametowidget(tab_id)
 
             if isinstance(current_tab, (RestarterTab, VotemapTab)):
@@ -2693,10 +2653,17 @@ class UnifiedMultiToolApp:
                                              _("dialog_invalid_action_msg"))
             return
 
+        try:
+            active_top_tab_id = self.top_level_notebook.select()
+            tool_name = self.top_level_notebook.tab(active_top_tab_id, "text")
+        except tk.TclError:
+            tool_name = "desconhecida"
+
         nome_servidor = current_tab.nome
         if Messagebox.okcancel(_("dialog_remove_server_title", server=nome_servidor),
                                _("dialog_remove_server_msg", server=nome_servidor,
-                                 tool=notebook.winfo_parent().winfo_class()), parent=self.root,
+                                 tool=tool_name),
+                               parent=self.root,
                                alert=True) == "OK":
             current_tab.stop_log_monitoring(from_tab_closure=True)
             if isinstance(current_tab, RestarterTab): current_tab.stop_scheduler_thread(from_tab_closure=True)
@@ -2705,7 +2672,7 @@ class UnifiedMultiToolApp:
             current_tab.destroy()
             self.mark_config_changed()
             self.set_status_from_thread(
-                _("status_server_removed", server=nome_servidor, tool=notebook.winfo_parent().winfo_class()))
+                _("status_server_removed", server=nome_servidor, tool=tool_name))
 
     def rename_current_server(self):
         _ = self.translator.get
@@ -2734,14 +2701,11 @@ class UnifiedMultiToolApp:
 
             if isinstance(tab_widget, (RestarterTab, VotemapTab)):
                 self._rename_tab(notebook, servidores, tab_widget)
-
         except tk.TclError:
-            # Click foi fora de uma aba
             pass
 
     def _rename_tab(self, notebook, servidores_list, tab_to_rename):
         _ = self.translator.get
-
         old_name = tab_to_rename.nome
         new_name = simpledialog.askstring(
             _("dialog_rename_server_title", server=old_name),
@@ -2758,14 +2722,12 @@ class UnifiedMultiToolApp:
                                              _("dialog_rename_error_empty_msg"))
             return
 
-        # Verifica se o nome já existe na lista (excluindo a aba atual)
         existing_names = [s.nome for s in servidores_list if s is not tab_to_rename]
         if new_name in existing_names:
             self.show_messagebox_from_thread("error", _("dialog_rename_error_duplicate_title"),
                                              _("dialog_rename_error_duplicate_msg", name=new_name))
             return
 
-        # Renomeia
         tab_to_rename.nome = new_name
         notebook.tab(tab_to_rename, text=new_name)
         self.mark_config_changed()
@@ -2803,26 +2765,21 @@ class UnifiedMultiToolApp:
     def create_menu(self):
         self.menubar = ttk.Menu(self.root)
         self.root.config(menu=self.menubar)
-        # Menus serão populados em `update_ui_text`
 
     def update_ui_text(self):
         """Atualiza o texto dos menus e widgets principais."""
         _ = self.translator.get
         self.root.title(_("app_title"))
 
-        # Limpa o menu antigo
         self.menubar.delete(0, "end")
 
-        # File Menu
         self.file_menu = ttk.Menu(self.menubar, tearoff=0)
         self.menubar.add_cascade(label=_("menu_file"), menu=self.file_menu)
         save_state = "normal" if self.config_changed else "disabled"
-        self.file_menu.add_command(label=_("menu_save_config"), command=self._save_app_config_to_file,
-                                   state=save_state)
+        self.file_menu.add_command(label=_("menu_save_config"), command=self._save_app_config_to_file, state=save_state)
         self.file_menu.add_separator()
         self.file_menu.add_command(label=_("menu_exit"), command=self.shutdown_application)
 
-        # Restarter Menu
         self.restarter_menu = ttk.Menu(self.menubar, tearoff=0)
         self.menubar.add_cascade(label=_("menu_restarter"), menu=self.restarter_menu)
         self.restarter_menu.add_command(label=_("menu_add_server"),
@@ -2830,7 +2787,6 @@ class UnifiedMultiToolApp:
         self.restarter_menu.add_command(label=_("menu_rename_server"), command=self.rename_current_server)
         self.restarter_menu.add_command(label=_("menu_remove_current_server"), command=self.remover_servidor_atual)
 
-        # Votemap Menu
         self.votemap_menu = ttk.Menu(self.menubar, tearoff=0)
         self.menubar.add_cascade(label=_("menu_votemap"), menu=self.votemap_menu)
         self.votemap_menu.add_command(label=_("menu_add_server"),
@@ -2838,7 +2794,6 @@ class UnifiedMultiToolApp:
         self.votemap_menu.add_command(label=_("menu_rename_server"), command=self.rename_current_server)
         self.votemap_menu.add_command(label=_("menu_remove_current_server"), command=self.remover_servidor_atual)
 
-        # Tools Menu
         tools_menu = ttk.Menu(self.menubar, tearoff=0)
         self.menubar.add_cascade(label=_("menu_tools"), menu=tools_menu)
         theme_menu = ttk.Menu(tools_menu, tearoff=0)
@@ -2847,7 +2802,6 @@ class UnifiedMultiToolApp:
         for theme_name in sorted(self.style.theme_names()):
             theme_menu.add_radiobutton(label=theme_name, variable=self.theme_var, command=self.trocar_tema)
 
-        # Language Menu
         lang_menu = ttk.Menu(self.menubar, tearoff=0)
         self.menubar.add_cascade(label=_("menu_language"), menu=lang_menu)
         self.lang_var = tk.StringVar(value=self.translator.language)
@@ -2856,12 +2810,10 @@ class UnifiedMultiToolApp:
         lang_menu.add_radiobutton(label="English (US)", variable=self.lang_var, value='en-us',
                                   command=self.switch_language)
 
-        # Help Menu
         help_menu = ttk.Menu(self.menubar, tearoff=0)
         self.menubar.add_cascade(label=_("menu_help"), menu=help_menu)
         help_menu.add_command(label=_("menu_about"), command=self.show_about)
 
-        # Atualiza texto das abas e widgets
         self.top_level_notebook.tab(self.restarter_frame, text=_("tab_top_restarter"))
         self.top_level_notebook.tab(self.votemap_frame, text=_("tab_top_votemap"))
         self.restarter_notebook.tab(self.restarter_system_log_frame, text=f"{_('tab_system_log')} (Restarter)")
@@ -2918,7 +2870,7 @@ class UnifiedMultiToolApp:
             if self.root.winfo_exists():
                 self.root.destroy()
         except tk.TclError:
-            pass  # A janela já pode ter sido destruída
+            pass
         app_logger.info("Aplicação encerrada.")
 
     def atualizar_logs_sistema_periodicamente(self):
@@ -2980,7 +2932,8 @@ class UnifiedMultiToolApp:
         except Exception as e:
             app_logger.error(f"Erro ao listar serviços Win: {e}", exc_info=True)
             if not self._shutting_down:
-                self.show_messagebox_from_thread("error", _("dialog_wmi_error_title"), _("dialog_wmi_error_msg", error=e))
+                self.show_messagebox_from_thread("error", _("dialog_wmi_error_title"),
+                                                 _("dialog_wmi_error_msg", error=e))
         finally:
             if progress_win.winfo_exists(): self.root.after(0, progress_win.destroy)
             if initialized_com: pythoncom.CoUninitialize()
@@ -3053,41 +3006,167 @@ class UnifiedMultiToolApp:
         self.status_bar_frame = ttk.Frame(self.root)
         self.status_bar_frame.pack(side='bottom', fill='x', pady=(0, 2), padx=2)
         ttk.Separator(self.status_bar_frame).pack(side='top', fill='x')
+
         self.status_label_var = tk.StringVar(value=self.translator.get("status_ready"))
         ttk.Label(self.status_bar_frame, textvariable=self.status_label_var, anchor='w').pack(side='left', fill='x',
                                                                                               expand=True, padx=5)
 
+        # --- NOVO: Botão de sino e badge para notificações ---
+        self.bell_frame = ttk.Frame(self.status_bar_frame)
+        self.bell_frame.pack(side='right', padx=5)
+
+        self.bell_button = ttk.Button(self.bell_frame, text='🔔', command=self.show_notification_center,
+                                      bootstyle='link')
+        self.bell_button.pack()
+        ToolTip(self.bell_button, self.translator.get("notification_center_title"))
+
+        self.bell_badge_label = ttk.Label(self.bell_frame, textvariable=self.unread_notifications,
+                                          bootstyle="danger-inverse",
+                                          font="-size 7 -weight bold", padding=(2, 0))
+        # A visibilidade da badge é controlada em _update_bell_badge
+
+    def _update_bell_badge(self, *args):
+        """Mostra ou esconde a badge de notificações não lidas."""
+        count = self.unread_notifications.get()
+        if count > 0:
+            self.bell_badge_label.place(in_=self.bell_button, relx=1.0, rely=0.0, anchor='ne')
+        else:
+            self.bell_badge_label.place_forget()
+
     def set_status_from_thread(self, message):
-        if not self._shutting_down and hasattr(self, 'root') and self.root.winfo_exists() and hasattr(self, 'status_label_var'):
+        if not self._shutting_down and hasattr(self, 'root') and self.root.winfo_exists() and hasattr(self,
+                                                                                                      'status_label_var'):
             self.root.after(0, lambda: self.status_label_var.set(str(message)[:250]))
 
     def show_messagebox_from_thread(self, boxtype, title, message):
-        if not self._shutting_down and hasattr(self, 'root') and self.root.winfo_exists():
-            parent = self.root.focus_get() if isinstance(self.root.focus_get(), tk.Toplevel) else self.root
-            self.root.after(0,
-                            lambda: getattr(Messagebox, f'show_{boxtype}')(message, title, parent=parent, alert=True))
+        """
+        Mantém o nome para compatibilidade com o código antigo, mas agora
+        chama o novo sistema de notificações toast.
+        Caixas de diálogo que exigem resposta (como ok/cancel) ainda usarão Messagebox diretamente.
+        """
+        # Apenas notificações informativas viram toasts.
+        if boxtype in ['info', 'success', 'warning', 'error']:
+            if not self._shutting_down and self.root.winfo_exists():
+                self.root.after(0, self._create_toast_notification, boxtype, title, message)
+        else:  # Fallback para caixas de diálogo interativas (se houver)
+            if not self._shutting_down and self.root.winfo_exists():
+                parent = self.root.focus_get() if isinstance(self.root.focus_get(), tk.Toplevel) else self.root
+                self.root.after(0,
+                                lambda: getattr(Messagebox, f'show_{boxtype}')(message, title, parent=parent,
+                                                                               alert=True))
+
+    def _create_toast_notification(self, boxtype, title, message, duration=5):
+        """Cria e gerencia um toast de notificação."""
+        self.notifications_history.appendleft((datetime.now(), boxtype, title, message))
+        self.unread_notifications.set(self.unread_notifications.get() + 1)
+
+        toast = NotificationToast(self, title, message, boxtype, duration)
+        self.active_toasts.append(toast)
+        self._reposition_toasts()
+
+    def on_toast_closed(self, toast_instance):
+        """Callback chamado quando um toast é fechado."""
+        if toast_instance in self.active_toasts:
+            self.active_toasts.remove(toast_instance)
+        self._reposition_toasts()
+
+    def _reposition_toasts(self):
+        """Posiciona todos os toasts ativos para que não se sobreponham."""
+        if not self.root.winfo_exists(): return
+
+        screen_w = self.root.winfo_screenwidth()
+        margin_x = 10
+        margin_y = 10
+        spacing = 5
+
+        current_y = self.root.winfo_y() + self.root.winfo_height() - margin_y
+
+        for toast in reversed(self.active_toasts):
+            if not toast.winfo_exists(): continue
+            toast_height = toast.winfo_height()
+            toast_width = 400  # Largura fixa para consistência
+
+            y_pos = current_y - toast_height
+            x_pos = screen_w - toast_width - margin_x
+
+            toast.geometry(f"{toast_width}x{toast_height}+{x_pos}+{y_pos}")
+            current_y = y_pos - spacing
+
+    def show_notification_center(self):
+        _ = self.translator.get
+        self.unread_notifications.set(0)
+
+        center_win = ttk.Toplevel(self.root)
+        center_win.title(_("notification_center_title"))
+        center_win.geometry("800x500")
+        center_win.transient(self.root)
+        center_win.grab_set()
+
+        top_frame = ttk.Frame(center_win)
+        top_frame.pack(side='top', fill='x', padx=10, pady=5)
+
+        ttk.Label(top_frame, text=_("notification_center_title"), font=("-size 12 -weight bold")).pack(side='left')
+
+        tree_frame = ttk.Frame(center_win)
+        tree_frame.pack(fill='both', expand=True, padx=10, pady=(0, 10))
+
+        cols = ('time', 'type', 'title', 'message')
+        tree = ttk.Treeview(tree_frame, columns=cols, show='headings')
+
+        col_widths = {'time': 140, 'type': 80, 'title': 150, 'message': 400}
+        for col, width in col_widths.items():
+            tree.heading(col, text=_(f"col_{col}"))
+            tree.column(col, width=width, anchor='w')
+
+        tree.tag_configure('info', background=self.style.colors.get('info'))
+        tree.tag_configure('success', background=self.style.colors.get('success'))
+        tree.tag_configure('warning', background=self.style.colors.get('warning'))
+        tree.tag_configure('error', background=self.style.colors.get('danger'))
+
+        def populate_tree():
+            for i in tree.get_children(): tree.delete(i)
+            if not self.notifications_history:
+                # Adiciona uma mensagem se não houver notificações
+                tree.insert('', 'end', values=('', '', '', _('no_notifications')))
+            else:
+                for item in self.notifications_history:
+                    timestamp, boxtype, title, message = item
+                    formatted_time = timestamp.strftime('%d/%m/%Y %H:%M:%S')
+                    tree.insert('', 'end', values=(formatted_time, boxtype.capitalize(), title, message),
+                                tags=(boxtype,))
+
+        populate_tree()
+
+        def clear_history():
+            self.notifications_history.clear()
+            populate_tree()
+            self.show_messagebox_from_thread('info', _('notification_center_title'), _('notification_cleared'))
+
+        ttk.Button(top_frame, text=_("clear_notifications"), command=clear_history, bootstyle='danger-outline').pack(
+            side='right')
+
+        tree.pack(side='left', fill='both', expand=True)
+        scrollbar = ttk.Scrollbar(tree_frame, orient='vertical', command=tree.yview)
+        scrollbar.pack(side='right', fill='y')
+        tree.configure(yscrollcommand=scrollbar.set)
+
+        center_win.wait_window()
 
     def set_application_icon(self):
-        """Define o ícone da janela principal da aplicação."""
         if not os.path.exists(ICON_PATH):
             app_logger.warning(f"Arquivo de ícone não encontrado em: {ICON_PATH}")
             return
-
         try:
             if PIL_AVAILABLE:
-                # Usar PIL/ImageTk é geralmente mais robusto em todas as plataformas,
-                # especialmente com PyInstaller.
                 img = Image.open(ICON_PATH)
                 self.app_icon_tk = ImageTk.PhotoImage(img)
                 self.root.iconphoto(True, self.app_icon_tk)
                 app_logger.info(f"Ícone '{ICON_PATH}' carregado com sucesso via PIL/ImageTk.")
             elif platform.system() == "Windows":
-                # Fallback para iconbitmap se PIL não estiver disponível no Windows
                 self.root.iconbitmap(default=ICON_PATH)
                 app_logger.info(f"Ícone '{ICON_PATH}' carregado com sucesso via iconbitmap (somente Windows).")
         except Exception as e:
             app_logger.error(f"Falha ao definir o ícone da aplicação de '{ICON_PATH}': {e}", exc_info=True)
-            # Tenta um último fallback no Windows se o primeiro método falhar
             if platform.system() == "Windows":
                 try:
                     self.root.iconbitmap(default=ICON_PATH)
@@ -3142,8 +3221,7 @@ class UnifiedMultiToolApp:
             self.bg_photo_image = ImageTk.PhotoImage(cropped_img)
             self.bg_label.configure(image=self.bg_photo_image)
         except Exception as e:
-            if not self._shutting_down:
-                app_logger.error(f"Erro ao redimensionar imagem de fundo: {e}", exc_info=True)
+            if not self._shutting_down: app_logger.error(f"Erro ao redimensionar imagem de fundo: {e}", exc_info=True)
 
     def _create_tray_image(self):
         if PIL_AVAILABLE:
@@ -3235,7 +3313,7 @@ def main():
         if app and not app._shutting_down:
             app.shutdown_application()
         elif not app:
-             app_logger.info("Aplicação finalizada.")
+            app_logger.info("Aplicação finalizada.")
 
 
 if __name__ == '__main__':

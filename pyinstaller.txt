@@ -1,1 +1,5 @@
 python -m PyInstaller --onefile --noconsole --icon="pred.ico" PQDT_Toolbox.py
+
+Nuitka
+cd "C:\Users\Raphael e Yasmin\PycharmProjects\PQDT_Toolbox"
+python -m nuitka --onefile --windows-console-mode=disable --enable-plugin=tk-inter --windows-icon-from-ico="pred.ico" --include-data-file="pred.ico=pred.ico" --include-data-file="pred.png=pred.png" PQDT_Toolbox.py
