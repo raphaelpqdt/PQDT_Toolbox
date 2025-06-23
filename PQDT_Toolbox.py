@@ -11,6 +11,7 @@ import time
 import threading
 import random
 import json
+import sqlite3
 import subprocess
 import logging
 import platform
@@ -140,7 +141,7 @@ class I18N:
                 "menu_save_config": "Salvar Configuração", "menu_exit": "Sair", "menu_restarter": "Auto-Restarter",
                 "menu_add_server": "Adicionar Servidor", "menu_rename_server": "Renomear Servidor",
                 "menu_remove_current_server": "Remover Servidor Atual", "menu_votemap": "Votemap Bypass",
-                "menu_tools": "Ferramentas", "menu_change_theme": "Mudar Tema", "menu_help": "Ajuda",
+                "menu_tools": "Ferramentas", "menu_change_theme": "Mudar Tema", "menu_collect_player_info": "Coletar Info Jogadores", "menu_help": "Ajuda",
                 "menu_about": "Sobre",
                 "tab_top_restarter": "Auto-Restarter", "tab_top_votemap": "Votemap Bypass",
                 "tab_system_log": "Log do Sistema",
@@ -344,7 +345,7 @@ class I18N:
                 "menu_save_config": "Save Configuration", "menu_exit": "Exit", "menu_restarter": "Auto-Restarter",
                 "menu_add_server": "Add Server", "menu_rename_server": "Rename Server",
                 "menu_remove_current_server": "Remove Current Server", "menu_votemap": "Votemap Bypass",
-                "menu_tools": "Tools", "menu_change_theme": "Change Theme", "menu_help": "Help", "menu_about": "About",
+                "menu_tools": "Tools", "menu_change_theme": "Change Theme", "menu_collect_player_info": "Collect Player Info", "menu_help": "Help", "menu_about": "About",
                 "tab_top_restarter": "Auto-Restarter", "tab_top_votemap": "Votemap Bypass",
                 "tab_system_log": "System Log",
                 "status_ready": "Ready.", "status_config_saved": "Configuration saved!",
@@ -1314,6 +1315,7 @@ class RestarterTab(ttk.Frame):
         self.logger.info(f"Restarter [{self.nome}]: Log processing worker stopped.")
 
     def _process_log_line(self, linha, current_filter):
+        self.app.process_player_info_line(linha)
         if not current_filter or current_filter in linha.lower():
             self.append_text_to_log_area(linha)
 
@@ -2161,6 +2163,7 @@ class VotemapTab(ttk.Frame):
         self.logger.info(f"Votemap [{self.nome}]: Log processing worker stopped.")
 
     def _process_log_line(self, linha, current_filter, vote_pattern, winner_pattern):
+        self.app.process_player_info_line(linha)
         if not current_filter or current_filter in linha.lower():
             self.append_text_to_log_area(linha)
 
@@ -2494,6 +2497,11 @@ class UnifiedMultiToolApp:
         self.notifications_history = deque(maxlen=100)  # Limita a 100 notificações
         self.unread_notifications = tk.IntVar(value=0)
         self.active_toasts = []
+        self.collect_player_info_var = tk.BooleanVar(value=self.config.get("collect_player_info", False))
+        self.player_db_conn = None
+        self.player_db_lock = threading.Lock()
+        if self.collect_player_info_var.get():
+            self._init_player_info_db()
 
         try:
             self.style.theme_use(self.config.get("theme", "darkly"))
@@ -2741,12 +2749,13 @@ class UnifiedMultiToolApp:
                     return json.load(f)
             except Exception as e:
                 app_logger.error(f"Erro ao carregar '{self.config_file}': {e}")
-        return {"theme": "darkly", "language": "pt-br", "restarter_servers": [], "votemap_servers": []}
+        return {"theme": "darkly", "language": "pt-br", "collect_player_info": False, "restarter_servers": [], "votemap_servers": []}
 
     def _save_app_config_to_file(self):
         config_data = {
             "theme": self.style.theme.name,
             "language": self.translator.language,
+            "collect_player_info": self.collect_player_info_var.get(),
             "restarter_servers": [s.get_current_config() for s in self.restarter_servidores],
             "votemap_servers": [s.get_current_config() for s in self.votemap_servidores]
         }
@@ -2801,6 +2810,12 @@ class UnifiedMultiToolApp:
         self.theme_var = tk.StringVar(value=self.style.theme.name)
         for theme_name in sorted(self.style.theme_names()):
             theme_menu.add_radiobutton(label=theme_name, variable=self.theme_var, command=self.trocar_tema)
+
+        tools_menu.add_checkbutton(
+            label=_("menu_collect_player_info"),
+            variable=self.collect_player_info_var,
+            command=self.toggle_collect_player_info
+        )
 
         lang_menu = ttk.Menu(self.menubar, tearoff=0)
         self.menubar.add_cascade(label=_("menu_language"), menu=lang_menu)
@@ -2861,6 +2876,12 @@ class UnifiedMultiToolApp:
             tab.stop_log_monitoring(from_tab_closure=True)
             if isinstance(tab, RestarterTab): tab.stop_scheduler_thread(from_tab_closure=True)
         if self.config_changed: self._save_app_config_to_file()
+        if self.player_db_conn:
+            try:
+                self.player_db_conn.close()
+            except Exception:
+                pass
+            self.player_db_conn = None
         if self.tray_icon:
             try:
                 self.tray_icon.stop()
@@ -3001,6 +3022,49 @@ class UnifiedMultiToolApp:
             self.config_changed = True
             if hasattr(self, 'file_menu'):
                 self.file_menu.entryconfigure(self.translator.get("menu_save_config"), state="normal")
+
+    def _init_player_info_db(self):
+        db_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'players_info.db')
+        try:
+            self.player_db_conn = sqlite3.connect(db_path, check_same_thread=False)
+            with self.player_db_conn:
+                self.player_db_conn.execute(
+                    'CREATE TABLE IF NOT EXISTS players (Player_Nickname TEXT PRIMARY KEY, Bohemia_ID TEXT)'
+                )
+        except Exception as e:
+            app_logger.error(f"Erro ao inicializar banco de jogadores: {e}", exc_info=True)
+
+    def toggle_collect_player_info(self):
+        if self.collect_player_info_var.get():
+            if not self.player_db_conn:
+                self._init_player_info_db()
+        else:
+            if self.player_db_conn:
+                try:
+                    self.player_db_conn.close()
+                except Exception:
+                    pass
+                self.player_db_conn = None
+        self.mark_config_changed()
+
+    def process_player_info_line(self, line):
+        if not self.collect_player_info_var.get():
+            return
+        if not self.player_db_conn:
+            self._init_player_info_db()
+        match = re.search(r'"(?P<nick>[^"]+)".*?(?P<id>\d+)', line)
+        if match and self.player_db_conn:
+            nick = match.group('nick')
+            bid = match.group('id')
+            try:
+                with self.player_db_lock:
+                    self.player_db_conn.execute(
+                        'INSERT OR IGNORE INTO players (Player_Nickname, Bohemia_ID) VALUES (?, ?)',
+                        (nick, bid)
+                    )
+                    self.player_db_conn.commit()
+            except Exception as e:
+                app_logger.error(f"Erro ao inserir jogador: {e}", exc_info=True)
 
     def create_status_bar(self):
         self.status_bar_frame = ttk.Frame(self.root)
