@@ -12,6 +12,7 @@ import threading
 import random
 import json
 import subprocess
+import sqlite3
 import logging
 import platform
 import tkinter as tk
@@ -142,6 +143,8 @@ class I18N:
                 "menu_remove_current_server": "Remover Servidor Atual", "menu_votemap": "Votemap Bypass",
                 "menu_tools": "Ferramentas", "menu_change_theme": "Mudar Tema", "menu_help": "Ajuda",
                 "menu_about": "Sobre",
+                "menu_player_collector": "Coletor de ID de Jogadores",
+                "log_player_added_db": "NOVO JOGADOR: '{nickname}' (ID: {bohemia_id}) adicionado ao banco de dados.",
                 "tab_top_restarter": "Auto-Restarter", "tab_top_votemap": "Votemap Bypass",
                 "tab_system_log": "Log do Sistema",
                 "status_ready": "Pronto.", "status_config_saved": "Configuração salva!",
@@ -347,6 +350,8 @@ class I18N:
                 "menu_tools": "Tools", "menu_change_theme": "Change Theme", "menu_help": "Help", "menu_about": "About",
                 "tab_top_restarter": "Auto-Restarter", "tab_top_votemap": "Votemap Bypass",
                 "tab_system_log": "System Log",
+                "menu_player_collector": "Player Info Collector",
+                "log_player_added_db": "NEW PLAYER: '{nickname}' (ID: {bohemia_id}) added to the database.",
                 "status_ready": "Ready.", "status_config_saved": "Configuration saved!",
                 "status_service_selected": "Service '{service}' selected for '{server}'.",
                 "status_server_removed": "Server '{server}' ({tool}) removed.",
@@ -535,6 +540,58 @@ class I18N:
                 "col_message": "Message",
             }
         }
+
+# ==============================================================================
+# CLASSE PlayerDBManager - NOVO GERENCIADOR DE BANCO DE DADOS DE JOGADORES
+# ==============================================================================
+class PlayerDBManager:
+    """ Gerencia o banco de dados de informações dos jogadores de forma thread-safe. """
+    def __init__(self, db_path="players_info.db"):
+        self.db_path = db_path
+        self.lock = threading.Lock()
+        self._create_table()
+        app_logger.info(f"Gerenciador de banco de dados de jogadores inicializado. Arquivo: '{db_path}'")
+
+    def _create_table(self):
+        """ Cria a tabela 'players' se ela não existir. """
+        with self.lock:
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                # Player_Nickname é a CHAVE PRIMÁRIA para garantir que seja único.
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS players (
+                        Player_Nickname TEXT PRIMARY KEY,
+                        Bohemia_ID TEXT NOT NULL
+                    )
+                """)
+                conn.commit()
+                conn.close()
+            except sqlite3.Error as e:
+                app_logger.error(f"Erro ao criar tabela no banco de dados de jogadores: {e}", exc_info=True)
+
+    def add_player(self, nickname, bohemia_id):
+        """
+        Adiciona um novo jogador ao banco de dados.
+        A instrução 'INSERT OR IGNORE' previne a inserção se o Player_Nickname já existir.
+        Retorna True se um novo jogador foi inserido, False caso contrário.
+        """
+        with self.lock:
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT OR IGNORE INTO players (Player_Nickname, Bohemia_ID) VALUES (?, ?)",
+                    (nickname, bohemia_id)
+                )
+                # cursor.rowcount será 1 se a inserção ocorreu, 0 se foi ignorada.
+                was_inserted = cursor.rowcount > 0
+                conn.commit()
+                conn.close()
+                return was_inserted
+            except sqlite3.Error as e:
+                app_logger.error(f"Erro ao adicionar jogador '{nickname}' ao banco de dados: {e}", exc_info=True)
+                return False
 
 
 # ==============================================================================
@@ -1314,6 +1371,9 @@ class RestarterTab(ttk.Frame):
         self.logger.info(f"Restarter [{self.nome}]: Log processing worker stopped.")
 
     def _process_log_line(self, linha, current_filter):
+        # Chama o processador de informações do jogador na app principal
+        self.app.process_player_info_from_log(linha)
+
         if not current_filter or current_filter in linha.lower():
             self.append_text_to_log_area(linha)
 
@@ -2161,6 +2221,9 @@ class VotemapTab(ttk.Frame):
         self.logger.info(f"Votemap [{self.nome}]: Log processing worker stopped.")
 
     def _process_log_line(self, linha, current_filter, vote_pattern, winner_pattern):
+        # Chama o processador de informações do jogador na app principal
+        self.app.process_player_info_from_log(linha)
+
         if not current_filter or current_filter in linha.lower():
             self.append_text_to_log_area(linha)
 
@@ -2490,6 +2553,22 @@ class UnifiedMultiToolApp:
         self.root.title(_("app_title"))
         self.root.geometry("1024x768")
 
+        # --- NOVO: Regex para captura de informações do jogador ---
+        self.player_info_regex = re.compile(r"Name=([^,]+),\s+IdentityId=([0-9a-fA-F\-]{36})")
+
+        # --- NOVO: Gerenciador do Banco de Dados de Jogadores ---
+        self.player_db_manager = PlayerDBManager()  # Cria a instância do DB manager
+
+        # --- NOVO: Variável para controlar o coletor de informações ---
+        self.player_info_collector_enabled = tk.BooleanVar(
+            value=self.config.get("player_collector_enabled", False)  # Carrega do config, padrão é desativado
+        )
+
+        # --- NOVO: Atributos da Central de Notificações ---
+        self.notifications_history = deque(maxlen=100)
+        self.unread_notifications = tk.IntVar(value=0)
+        self.active_toasts = []
+
         # --- NOVO: Atributos da Central de Notificações ---
         self.notifications_history = deque(maxlen=100)  # Limita a 100 notificações
         self.unread_notifications = tk.IntVar(value=0)
@@ -2744,11 +2823,13 @@ class UnifiedMultiToolApp:
         return {"theme": "darkly", "language": "pt-br", "restarter_servers": [], "votemap_servers": []}
 
     def _save_app_config_to_file(self):
+        # MODIFICADO: Adicionar o estado do coletor ao salvar
         config_data = {
             "theme": self.style.theme.name,
             "language": self.translator.language,
             "restarter_servers": [s.get_current_config() for s in self.restarter_servidores],
-            "votemap_servers": [s.get_current_config() for s in self.votemap_servidores]
+            "votemap_servers": [s.get_current_config() for s in self.votemap_servidores],
+            "player_collector_enabled": self.player_info_collector_enabled.get() # NOVO
         }
         try:
             with open(self.config_file, 'w', encoding='utf-8') as f:
@@ -2796,11 +2877,20 @@ class UnifiedMultiToolApp:
 
         tools_menu = ttk.Menu(self.menubar, tearoff=0)
         self.menubar.add_cascade(label=_("menu_tools"), menu=tools_menu)
+
         theme_menu = ttk.Menu(tools_menu, tearoff=0)
         tools_menu.add_cascade(label=_("menu_change_theme"), menu=theme_menu)
         self.theme_var = tk.StringVar(value=self.style.theme.name)
         for theme_name in sorted(self.style.theme_names()):
             theme_menu.add_radiobutton(label=theme_name, variable=self.theme_var, command=self.trocar_tema)
+
+        # --- NOVO: Adiciona o checkbutton do coletor de jogadores ---
+        tools_menu.add_separator()
+        tools_menu.add_checkbutton(
+            label=_("menu_player_collector"),
+            variable=self.player_info_collector_enabled,
+            command=self.mark_config_changed  # Marca que a config mudou para poder salvar
+        )
 
         lang_menu = ttk.Menu(self.menubar, tearoff=0)
         self.menubar.add_cascade(label=_("menu_language"), menu=lang_menu)
@@ -3151,6 +3241,28 @@ class UnifiedMultiToolApp:
         tree.configure(yscrollcommand=scrollbar.set)
 
         center_win.wait_window()
+
+
+    def process_player_info_from_log(self, log_line):
+        """
+        Processa uma linha de log para extrair e salvar informações do jogador, se o coletor estiver ativo.
+        """
+        if not self.player_info_collector_enabled.get():
+            return
+
+        match = self.player_info_regex.search(log_line)
+        if match:
+            nickname = match.group(1).strip()
+            bohemia_id = match.group(2).strip()
+
+            # Tenta adicionar o jogador ao DB
+            was_added = self.player_db_manager.add_player(nickname, bohemia_id)
+            # Se o jogador era novo e foi adicionado, loga a informação
+            if was_added:
+                log_msg = self.translator.get("log_player_added_db", nickname=nickname, bohemia_id=bohemia_id)
+                app_logger.info(log_msg)
+                # Opcional: Adicionar ao log da aba específica também
+                # self.append_text_to_log_area_threadsafe(log_msg + "\n")
 
     def set_application_icon(self):
         if not os.path.exists(ICON_PATH):
